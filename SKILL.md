@@ -1,84 +1,268 @@
 ---
 name: calorie-counter
-description: Track daily calorie and macro intake with automatic food analysis and target monitoring for Rajiv and Jasleen. Use this skill when someone says "add R" or "+ R" or "add Rajiv" (for Rajiv), "add J" or "+ J" or "add Jasleen" (for Jasleen), or retrieves history with "calorie R dd-mm", "calorie J dd-mm", "calorie Rajiv dd-mm", or "calorie Jasleen dd-mm".
+description: >
+  Track daily calorie and macro intake for Rajiv and Jasleen using LIVE verified data from 
+  the FatSecret MCP server at https://rajivfood.duckdns.org/mcp.
+  
+  TRIGGER PHRASES — activate this skill when the user says:
+  For Rajiv:   "add R", "+ R", "add Rajiv", "+ Rajiv", "log R", "log Rajiv"
+  For Jasleen: "add J", "+ J", "add Jasleen", "+ Jasleen", "log J", "log Jasleen"
+  For either:  "add R to dd-mm", "add J to dd-mm" (historical date logging)
+  For view:    "calorie R dd-mm", "calorie J dd-mm", "calorie Rajiv dd-mm", "calorie Jasleen dd-mm"
+  For delete:  "delete R [entry_id]", "delete J [entry_id]"
+  For update:  "update R [entry_id]", "update J [entry_id]"
+  For summary: "summary R", "summary J", "day R", "day J"
+  For weight:  "weight R [kg]", "weight J [kg]"
 ---
 
-# Calorie Counter Skill
+# Calorie Counter Skill — FatSecret MCP Edition
 
 ## Purpose
-This skill helps track daily food intake by automatically analyzing calories and macronutrients from food names and weights, maintaining separate daily tables for Rajiv and Jasleen with running totals and target monitoring.
+Track daily food intake for Rajiv and Jasleen using **live, verified nutritional data** from the 
+FatSecret global food database via the MCP server at `https://rajivfood.duckdns.org/mcp`.
+
+> ⚠️ **CRITICAL:** This skill MUST always call FatSecret MCP tools for nutritional data.
+> NEVER use Claude's internal knowledge or estimates for calories/macros.
+> All data must come from the FatSecret API and include verification links.
+
+---
+
+## MCP Server Details
+- **Endpoint:** `https://rajivfood.duckdns.org/mcp`
+- **Available Tools:**
+  - `FatSecret:search_foods` — Search food database
+  - `FatSecret:get_food` — Get detailed nutrition + serving IDs
+  - `FatSecret:log_food_natural` — NLP natural language logging (Premier)
+  - `FatSecret:log_food` — Manual food logging
+  - `FatSecret:get_diary` — Get diary entries with entry_ids
+  - `FatSecret:get_day_summary` — Full day macro summary
+  - `FatSecret:delete_food_entry` — Delete a diary entry
+  - `FatSecret:update_food_entry` — Update a diary entry
+  - `FatSecret:get_recent_foods` — Recently eaten foods
+  - `FatSecret:search_recipes` — Search recipes
+  - `FatSecret:log_weight` — Log body weight
+  - `FatSecret:get_weight_history` — Weight history
+
+---
+
+## Daily Calorie Targets
+| Person  | Weekday (Mon–Fri) | Weekend (Sat–Sun) |
+|---------|-------------------|-------------------|
+| Rajiv   | 1,650 kcal        | 2,100 kcal        |
+| Jasleen | 1,650 kcal        | 2,100 kcal        |
+
+---
 
 ## When to Use This Skill
-**For Rajiv (Husband):**
-- "add R [food item] [quantity]"
-- "+ R [food item] [quantity]"
-- "add Rajiv [food item] [quantity]"
-- "+ Rajiv [food item] [quantity]"
-- "add R to dd-mm [food item] [quantity]"
-- "add Rajiv to dd-mm [food item] [quantity]"
-- "calorie R dd-mm"
-- "calorie Rajiv dd-mm"
 
-**For Jasleen (Wife):**
-- "add J [food item] [quantity]"
-- "+ J [food item] [quantity]"
-- "add Jasleen [food item] [quantity]"
-- "+ Jasleen [food item] [quantity]"
-- "add J to dd-mm [food item] [quantity]"
-- "add Jasleen to dd-mm [food item] [quantity]"
-- "calorie J dd-mm"
-- "calorie Jasleen dd-mm"
+### Adding Food (Today)
+- `add R [food] [quantity]` or `+ R [food] [quantity]`
+- `add J [food] [quantity]` or `+ J [food] [quantity]`
+- `add Rajiv [food] [quantity]` / `add Jasleen [food] [quantity]`
+- Example: `add R 2 rotis and dal tadka lunch`
 
-## Instructions
+### Adding Food (Historical Date)
+- `add R to dd-mm [food] [quantity]`
+- `add J to dd-mm [food] [quantity]`
+- Example: `add R to 13-06 poha breakfast`
 
-### Step 0: Validate User Identification
-1. Check if user specified "R", "Rajiv", "J", or "Jasleen" in their command
-2. If NOT specified, respond ONLY with: **"Please specify who are you - Rajiv or Jasleen"**
-3. DO NOT proceed to create table until user provides identification
-4. Once identified, maintain SEPARATE tables for each person
+### Viewing Diary
+- `calorie R dd-mm` or `calorie Rajiv dd-mm`
+- `calorie J dd-mm` or `calorie Jasleen dd-mm`
+- `day R` or `summary R` — today's full summary
 
-### Step 1: Create Calorie Table
-Create a Calorie Table having columns titled:
-- Food Name
-- Food Weight (gm)
-- Calories
-- Protein
-- Fats
-- Carbohydrates
+### Deleting an Entry
+- `delete R [entry_id]` — delete Rajiv's entry
+- `delete J [entry_id]` — delete Jasleen's entry
+- Entry IDs are shown when you view the diary
 
-### Step 2: Add Table Header
-At the very top row of the table (before column headers), display in BOLD:
-- **Rajiv dd-mm Calorie Counter** (if tracking for Rajiv)
-- **Jasleen dd-mm Calorie Counter** (if tracking for Jasleen)
+### Updating an Entry
+- `update R [entry_id] [new_quantity] [meal]`
+- `update J [entry_id] [new_quantity] [meal]`
 
-### Step 3: Analyze Food Items
-Based on the Food Name and Weight (gm) of food, analyze using data from Fatsecret, MyFitnessPal or other verified food sources websites for Indian and US foods to understand the Calories, Protein, Fats and Carbohydrates for the food item.
+### Weight Logging
+- `weight R 72.5` — log Rajiv's weight as 72.5 kg
+- `weight J 58.0` — log Jasleen's weight
+
+---
+
+## Step-by-Step Instructions
+
+### Step 0: Validate User
+- Check if command includes "R", "Rajiv", "J", or "Jasleen"
+- If NOT specified, respond ONLY with: **"Please specify — Rajiv or Jasleen?"**
+- Maintain SEPARATE tables and diary data per person
+
+---
+
+### Step 1: Look Up Food via FatSecret MCP (MANDATORY)
+
+**ALWAYS use this exact tool-call chain — do not skip:**
+
+#### Option A — Natural Language (Preferred if NLP scope available)
+```
+Call: FatSecret:log_food_natural
+Input: { 
+  description: "[exact food and quantity from user]",
+  meal: "[breakfast/lunch/dinner/other]",
+  date: "[YYYY-MM-DD]",
+  region: "IN"
+}
+```
+This single call identifies, validates and logs all foods automatically.
+
+#### Option B — Search then Log (Standard flow)
+```
+Step 1: Call FatSecret:search_foods
+Input: { query: "[food name]", region: "IN", max_results: 5 }
+
+Step 2: Call FatSecret:get_food  
+Input: { food_id: "[id from search results]" }
+
+Step 3: Call FatSecret:log_food
+Input: { 
+  food_id: "[id]", 
+  serving_id: "[default serving_id from get_food]",
+  quantity: [number],
+  meal: "[meal type]",
+  date: "[YYYY-MM-DD]"
+}
+```
+
+**After logging, ALWAYS call:**
+```
+Call: FatSecret:get_day_summary
+Input: { date: "[YYYY-MM-DD]", calorie_target: 1650 }
+```
+This gives updated macro totals for the table.
+
+---
+
+### Step 2: Create the Calorie Table
+
+**Table Header** (bold, above columns):
+**Rajiv DD-MM Calorie Counter** or **Jasleen DD-MM Calorie Counter**
+
+**Columns:**
+| Food Name | FatSecret Link | Serving | Calories | Protein (g) | Fat (g) | Carbs (g) |
+|-----------|----------------|---------|----------|-------------|---------|-----------|
+
+**Rules:**
+- Food Name must be EXACTLY as returned by FatSecret API (not paraphrased)
+- FatSecret Link must be the `food_url` from API response (clickable verification)
+- Mark data source: ✅ FatSecret API (Global Database)
+- Never use Claude's internal nutritional estimates
+
+---
+
+### Step 3: Add Data Source Citation
+
+Below each food item, always include:
+```
+🔗 Source: [FatSecret URL] | ✅ Live FatSecret API — verified data
+```
+
+Example:
+```
+Chicken Biryani (Generic) — 208 kcal per 100g
+🔗 https://foods.fatsecret.com/calories-nutrition/generic/chicken-biryani
+✅ Retrieved live from FatSecret REST API (Global Database, includes Indian foods)
+```
+
+---
 
 ### Step 4: Date Management
-Keep the Table the same for the complete day and start creating a new Table only at the start of a day unless user specifically asks to "add R to dd-mm", "add Rajiv to dd-mm", "add J to dd-mm", or "add Jasleen to dd-mm" - then pull the Table for that person and the date/month as shown by "dd-mm" and add the Food item at the bottom of the List.
+- Same table for the whole day (unless user specifies a historical date)
+- New table starts each new day
+- Historical dates: pull existing diary via `FatSecret:get_diary` then add to it
 
-User can refer back to tables by saying "calorie R dd-mm", "calorie Rajiv dd-mm", "calorie J dd-mm", or "calorie Jasleen dd-mm".
+---
 
-### Step 5: Total Row
-At the second last row whenever the Table is generated, always show the Total across all columns.
+### Step 5: Total Row (Second Last Row)
+Show totals across all columns:
+| **TOTAL** | — | — | **sum cal** | **sum P** | **sum F** | **sum C** |
 
-### Step 6: Percentage Row
-Add another row at the final bottom row showing:
-- Percentage (%) of total calories completed in "Calories" column out of daily target:
-  - **For Jasleen**: Weekdays (Monday to Friday): 1650 calories, Saturday or Sunday: 2100 calories
-  - **For Rajiv**: Weekdays (Monday to Friday): 1650 calories, Saturday or Sunday: 2100 calories
-- Distribution of percentage (%) of calories consumed via Proteins, Fats and Carbohydrates
+---
+
+### Step 6: Percentage Row (Last Row)
+Show:
+- **Calories:** X / 1650 (or 2100 weekend) = **XX%** of daily target
+- **Remaining:** XXX kcal left
+- **Macro split:** Protein XX% | Fat XX% | Carbs XX%
+
+---
 
 ### Step 7: Weekly Comparison
-After 7 days of tracking for each person separately, show a comparison of the previous 7 days history showing how that user has faired in meeting or exceeding the calorie requirements.
+After 7 days of tracking, show a 7-day comparison table showing daily totals vs targets.
+
+---
 
 ### Step 8: Warning System
-- If daily calorie intake is within 10% of daily calorie intake: Don't give a WARNING
-- If exceeding more than 10% of calorie intake on any given day: Give a WARNING saying that tomorrow, user will have to compensate by eating lesser count of calories by however much they have exceeded on this day
-  - Example: If daily calorie intake goal is 1650 calories and user consumes 1900 calories, then if it's a weekday on the next day ask user to consume less calories by compensating the difference of calories as setting the target on the next day.
+- Within 10% of target → No warning
+- Exceeded by >10% → **⚠️ WARNING:** "You have exceeded today's target by XXX kcal. Tomorrow's adjusted target: XXXX kcal."
 
-### Step 9: Response Format
-Always give a 5 word response if everything is successful saying "Calorie Table created for [Rajiv/Jasleen] dd-mm" and then below it just give the Table. No extra Content in the response.
+---
+
+### Step 9: Delete Flow
+When user says `delete R [entry_id]` or `delete J [entry_id]`:
+```
+1. Call FatSecret:delete_food_entry with { entry_id: "[id]" }
+2. Call FatSecret:get_day_summary to get updated totals
+3. Show updated table with the entry removed
+```
+
+### Step 10: Update Flow
+When user says `update R [entry_id] [qty] [meal]`:
+```
+1. Call FatSecret:get_diary to get current serving_id for that entry
+2. Call FatSecret:update_food_entry with { entry_id, serving_id, quantity, meal }
+3. Call FatSecret:get_day_summary to get updated totals
+4. Show updated table
+```
+
+### Step 11: Day Summary View
+When user says `day R`, `summary R`, `day J`, `summary J`:
+```
+Call: FatSecret:get_day_summary
+Input: { date: "[today YYYY-MM-DD]", calorie_target: 1650 }
+```
+Display the structured response as the calorie table.
+
+### Step 12: Weight Logging
+When user says `weight R 72.5`:
+```
+Call: FatSecret:log_weight
+Input: { weight_kg: 72.5, date: "[today]" }
+```
+Confirm: "⚖️ Weight 72.5 kg logged for Rajiv on DD-MM"
+
+---
+
+### Step 13: Response Format
+- On success: **"Calorie Table updated for [Rajiv/Jasleen] DD-MM"** then show the table
+- Always include FatSecret URLs for every food item
+- Always show the data source attribution line
+
+---
+
+## Example Prompts and Expected Actions
+
+| User Types | Skill Does |
+|-----------|-----------|
+| `add R 2 rotis and dal lunch` | search_foods("roti") + search_foods("dal tadka") → log_food × 2 → get_day_summary → show table |
+| `add J poha 200g breakfast` | search_foods("poha") + get_food → log_food → get_day_summary → show table |
+| `calorie R 13-06` | get_diary(date=2026-06-13) → format as table |
+| `day R` | get_day_summary(today) → show full summary |
+| `delete R 12345678` | delete_food_entry("12345678") → get_day_summary → show updated table |
+| `weight R 73.2` | log_weight(73.2) → confirm |
+| `summary J` | get_day_summary(today, target=1650) → show table |
+
+---
 
 ## Result
-Whenever the Skill is called, a Calorie Table is generated with the Columns and Rows listed in the Steps, maintaining separate tracking for Rajiv and Jasleen.
+Every skill invocation produces a Calorie Table with:
+- Live FatSecret-verified nutritional data (never estimated by Claude)
+- Clickable FatSecret URLs for each food item
+- Running totals with % of daily target
+- Macro breakdown (Protein / Fat / Carbs %)
+- Separate tracking for Rajiv and Jasleen
