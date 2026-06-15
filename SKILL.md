@@ -30,6 +30,9 @@ and verification links come from this MCP server — never from Claude's own kno
 3. **Every table row must have a Confidence column** — values from TABLE_ROW only
 4. **Every table row must have a FatSecret Link column** — values from TABLE_ROW only
 5. **If FatSecret returns no result** — say "not found in FatSecret" — never estimate
+6. **NEVER say "the skill doesn't support X"** — if a tool exists for it, call the tool
+7. **Delete = call `FatSecret:delete_food_entry`** — never just redraw table without it
+8. **This skill requires Claude Sonnet or Opus** — Haiku cannot reliably follow these steps
 
 ---
 
@@ -200,12 +203,36 @@ If `get_day_summary` response contains `WARNING:` line → copy it below the tab
 
 ## Step 9 — Delete
 
+**Delete triggers** — any of these phrases mean the user wants to remove a food:
+- "delete R coffee", "remove R coffee", "delete J rice"
+- "delete R [entry_id]"
+- "remove coffee from my diary"
+- "I don't want coffee logged"
+
+**MANDATORY delete flow — always follow these exact steps:**
+
 ```
-"delete R [entry_id]":
-→ Call delete_food_entry(entry_id)
-→ Call get_day_summary to refresh
-→ Show updated table (remove that row)
+IF user gives a food name (not an entry_id):
+  Step A: Call FatSecret:get_diary { date: today }
+          → Find the entry where food_entry_name matches the food name
+          → Get its food_entry_id
+
+  Step B: Confirm with user:
+          "I found [food name] with entry_id [id] — delete it? (y/n)"
+
+  Step C: If yes → Call FatSecret:delete_food_entry { entry_id: "[id]" }
+
+IF user gives an entry_id directly:
+  Step A: Call FatSecret:delete_food_entry { entry_id: "[id]" }
+
+ALWAYS after deletion:
+  Call FatSecret:get_day_summary { date: today, calorie_target: 1650 }
+  Show updated table with the deleted row removed
+  Show updated TOTAL and % rows
 ```
+
+**NEVER** handle deletion by manually redrawing the table without calling `delete_food_entry`.
+**NEVER** say "the skill doesn't have a delete function" — it does, via `FatSecret:delete_food_entry`.
 
 ---
 
