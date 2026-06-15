@@ -4,40 +4,36 @@ description: >
   Track daily calorie and macro intake for Rajiv and Jasleen using LIVE verified data
   from the FatSecret MCP server at https://rajivfood.duckdns.org/mcp.
 
-  TRIGGER PHRASES — activate this skill when user says ANY of:
+  TRIGGER PHRASES:
   ADD:    "add R", "+ R", "add Rajiv", "log R", "add J", "+ J", "add Jasleen", "log J"
-          "add [food]" or "+ [food]" (no R/J → ask who, then continue)
-  DATE:   "add R to dd-mm", "add J to dd-mm"
+          or just "add [food]" with no R/J → ask who then continue
+  DATE:   "add R to dd-mm [food]", "add J to dd-mm [food]"
   VIEW:   "calorie R dd-mm", "calorie J dd-mm", "day R", "day J", "summary R", "summary J"
   DELETE: "delete R [entry_id]", "delete J [entry_id]"
   UPDATE: "update R [entry_id]", "update J [entry_id]"
   WEIGHT: "weight R [kg]", "weight J [kg]"
 ---
 
-# Calorie Counter Skill — FatSecret MCP Edition v4
+# Calorie Counter Skill — FatSecret MCP v5
 
 ## Purpose
-Track daily food intake for Rajiv and Jasleen using **live, verified nutritional data**
-from the FatSecret global food database via MCP at `https://rajivfood.duckdns.org/mcp`.
-
-> ⚠️ CRITICAL RULES — NEVER BREAK THESE:
-> 1. ALWAYS call FatSecret MCP tools — NEVER use Claude's own nutritional estimates
-> 2. ALWAYS include FatSecret food_url link for every food item
-> 3. ALWAYS show confidence score for every food match (in table AND as column)
-> 4. ALWAYS label data as "✅ FatSecret REST API — Global Database (Live)"
-> 5. NEVER guess calories — if FatSecret returns no result, say so explicitly
+Track daily food for Rajiv and Jasleen using LIVE FatSecret data via
+`https://rajivfood.duckdns.org/mcp`. All nutrition values, confidence scores
+and verification links come from this MCP server — never from Claude's own knowledge.
 
 ---
 
-## MCP Server
-- **URL:** `https://rajivfood.duckdns.org/mcp`
-- **Tools used:** `search_multi_food`, `get_food`, `log_food`, `get_diary`,
-  `get_day_summary`, `delete_food_entry`, `update_food_entry`, `search_foods`,
-  `search_recipes`, `log_weight`, `get_weight_history`
+## ABSOLUTE RULES — NEVER BREAK
+
+1. **ALWAYS call FatSecret MCP tools first** — never use Claude's own food data
+2. **TABLE_ROW values from the server must be copied EXACTLY** — never modify them
+3. **Every table row must have a Confidence column** — values from TABLE_ROW only
+4. **Every table row must have a FatSecret Link column** — values from TABLE_ROW only
+5. **If FatSecret returns no result** — say "not found in FatSecret" — never estimate
 
 ---
 
-## Daily Targets
+## Daily Calorie Targets
 | Person  | Weekday (Mon–Fri) | Weekend (Sat–Sun) |
 |---------|-------------------|-------------------|
 | Rajiv   | 1,650 kcal        | 2,100 kcal        |
@@ -47,221 +43,225 @@ from the FatSecret global food database via MCP at `https://rajivfood.duckdns.or
 
 ## Step 0 — Identify Person
 
-Check if "R", "Rajiv", "J", or "Jasleen" is present in the command.
-
-**If person IS identified:** proceed immediately to Step 1.
-
-**If person is NOT identified:**
-- Respond: **"For Rajiv or Jasleen? (R/J)"**
-- Remember the entire original food command exactly as typed
-- When they reply "R" or "J" → continue with full original command as if they had written R/J from the start
-- Do NOT ask them to retype their food entry
+- If "R", "Rajiv", "J", or "Jasleen" found → proceed to Step 1
+- If NOT found → ask **"For Rajiv or Jasleen? (R/J)"**
+  - Remember the full original food command
+  - When they reply R or J → continue with their original command automatically
+  - Do NOT ask them to retype food
 
 ---
 
-## Step 1 — Parse the Input
+## Step 1 — Parse Input
 
-Extract these three things from the user's message:
+Extract from user message:
+- **Person:** R/Rajiv or J/Jasleen
+- **Meal:** breakfast / lunch / dinner / other (infer from time if not stated)
+- **Foods + quantities** in ANY format:
+  - `add R 100 gm rice` → rice, 100g
+  - `add R rice 100g` → rice, 100g
+  - `add R 2 rotis and dal` → roti × 2, dal × 1
+  - `add J 1 cup poha` → poha, 1 cup
+  - `add R chicken biryani 250gm` → chicken biryani, 250g
+  - `add J poha` → poha, default serving
 
-**A. Person:** R/Rajiv or J/Jasleen
-
-**B. Meal:** breakfast / lunch / dinner / other
-- If not specified, infer from time of day or ask once
-
-**C. Food items with quantities** — handle ALL these formats:
-```
-"add R 100 gm rice"           → rice, 100g
-"add R rice 100g"             → rice, 100g
-"add R 2 rotis and dal"       → roti ×2, dal ×1
-"add J 1 cup poha"            → poha, 1 cup
-"add R chicken biryani 250gm" → chicken biryani, 250g
-"add R 1 banana and 2 eggs"   → banana ×1, egg ×2
-"add J poha"                  → poha, quantity unknown → use default serving
-```
-
-Parse each food into: `{ name: "rice", quantity: 100, unit: "gm" }`
-If quantity is missing → use FatSecret's default serving size.
+Build:
+- `foods` list: individual food names → e.g. `["rice"]` or `["roti", "dal"]`
+- `qty_map`: quantity per food → e.g. `{"rice": "100g"}` or `{"roti": "2 pieces"}`
 
 ---
 
-## Step 2 — Food Lookup via FatSecret MCP (MANDATORY)
+## Step 2 — Call FatSecret MCP (MANDATORY — NEVER SKIP)
 
 ```
-A. Build food list from parsed items:
-   e.g. ["rice", "roti", "dal tadka"]
-
-B. Call FatSecret:search_multi_food
-   Input: { foods: ["rice", "roti", "dal tadka"], region: "IN" }
-
-C. Read confidence scores:
-   ✅ HIGH (80-100)  → proceed to log automatically
-   ⚠️ MEDIUM (50-79) → show match, ask "Is [food name] correct? (y/n)"
-   ❌ LOW (0-49)     → show top 3 options, ask user to pick by number
-
-D. For each confirmed food:
-   Call FatSecret:get_food { food_id: "[id]" }
-   → gets default serving_id and exact per-serving nutrition
-
-E. Scale nutrition to user's quantity:
-   If user said 100g and default serving is 30g:
-   multiply all macros by (100/30) = 3.33×
-
-F. Call FatSecret:log_food for each confirmed food:
-   Input: {
-     food_id:    "[id]",
-     serving_id: "[default serving_id]",
-     quantity:   [scaled quantity],
-     meal:       "[meal]",
-     date:       "[YYYY-MM-DD]"
-   }
-
-G. Call FatSecret:get_day_summary
-   Input: { date: "[YYYY-MM-DD]", calorie_target: 1650 }
+Call: FatSecret:search_multi_food
+Input: {
+  foods:   ["rice"],           ← individual food names only
+  qty_map: {"rice": "100g"},   ← quantities mapped per food
+  region:  "IN"
+}
 ```
+
+The server returns structured blocks including:
+- `TABLE_ROW:` — pre-formatted markdown table row (copy this DIRECTLY)
+- `CONFIDENCE:` — score/100 + emoji
+- `FATSECRET_URL:` — verification link
+- `STATUS:` — AUTO_LOG, CONFIRM, or MANUAL_PICK
+
+**Act on STATUS:**
+- `AUTO_LOG` → copy TABLE_ROW into calorie table, then call log_food
+- `CONFIRM`  → show user: "I found '[food name]' for '[query]' — correct? (y/n)"
+               If yes → copy TABLE_ROW_IF_CONFIRMED, call log_food
+- `MANUAL_PICK` → show ALT options by number, wait for user choice
+
+**Then call log_food for each confirmed item:**
+```
+Call: FatSecret:get_food { food_id: "[id from search result]" }
+→ gets serving_id and exact per-serving nutrition
+
+Call: FatSecret:log_food {
+  food_id:    "[id]",
+  serving_id: "[default serving_id from get_food]",
+  quantity:   [number],
+  meal:       "[meal]",
+  date:       "[YYYY-MM-DD]"
+}
+```
+
+**Finally always call:**
+```
+Call: FatSecret:get_day_summary {
+  date:           "[YYYY-MM-DD]",
+  calorie_target: 1650
+}
+```
+Use the TOTALS_ROW and PCT_ROW from this response for the table footer.
 
 ---
 
 ## Step 3 — Build the Calorie Table
 
-**Header** (bold, first line):
+**Header (bold):**
 **Rajiv DD-MM Calorie Counter** or **Jasleen DD-MM Calorie Counter**
 
-**Table columns — in this exact order:**
+**Exact column order — always 8 columns (# is row number prefix):**
 
-| # | Food Name | Qty | Confidence | FatSecret Link | Calories | Protein (g) | Fat (g) | Carbs (g) |
-|---|-----------|-----|------------|----------------|----------|-------------|---------|-----------|
+| # | Food Name | Qty | Calories | Protein (g) | Fat (g) | Carbs (g) | Confidence | FatSecret Link |
+|---|-----------|-----|----------|-------------|---------|-----------|------------|----------------|
 
-**Column rules:**
-- **#** — row number
-- **Food Name** — exactly as returned by FatSecret API
-- **Qty** — quantity as user specified (e.g. "100g", "2 rotis", "1 cup")
-- **Confidence** — format: `88/100 ✅` or `65/100 ⚠️` or `35/100 ❌`
-- **FatSecret Link** — shortened display e.g. `fatsecret.com/rice` linking to full food_url
-- **Calories, Protein, Fat, Carbs** — scaled to user's actual quantity
+**Confidence column:**
+- Copy EXACTLY from `TABLE_ROW` in server response
+- Format: `88/100 ✅` or `65/100 ⚠️` or `35/100 ❌`
+- HIGH ✅ = exact or near-exact match
+- MEDIUM ⚠️ = possible match — user confirmed
+- LOW ❌ = weak match — user manually picked
 
-**Why confidence score in the table:**
-The confidence column lets Rajiv and Jasleen instantly see at a glance whether
-each food was matched exactly or approximately — without needing to click any link.
-A score of 88/100 for "rice" means trust it. A score of 45/100 means verify it.
-This is especially important for Indian foods where spelling variants are common
-(roti/chapati/phulka, dal/dahl/lentils, poha/beaten rice etc.)
+**FatSecret Link column:**
+- Copy EXACTLY from `TABLE_ROW` in server response
+- Renders as: `[🔗 View](https://foods.fatsecret.com/...)`
+- This is the live FatSecret URL for the user to verify independently
+
+**Nutrition values:**
+- Copy EXACTLY from `TABLE_ROW` in server response
+- These are FatSecret API values — never substitute with Claude's estimates
 
 ---
 
-## Step 4 — Total Row (second last row)
+## Step 4 — Total Row
 
+Copy TOTALS_ROW from `get_day_summary` response EXACTLY:
+```
 | **TOTAL** | — | — | — | — | **ΣCal** | **ΣP g** | **ΣF g** | **ΣC g** |
+```
 
 ---
 
-## Step 5 — Percentage Row (last row)
+## Step 5 — Percentage Row
 
-| **% of target** | — | — | — | — | **XX%** | **P:XX%** | **F:XX%** | **C:XX%** |
+Copy PCT_ROW from `get_day_summary` response EXACTLY:
+```
+| **% of 1650** | — | — | — | — | **XX%** | **P:XX%** | **F:XX%** | **C:XX%** |
+```
 
-- Calories %: (total cal / daily target) × 100
-- Remaining: show below table — "**Remaining: XXX kcal**"
-- Macro %: protein cals = P×4, fat cals = F×9, carb cals = C×4, each as % of total cal
+Then on a new line below the table:
+**Remaining: XXX kcal**
+✅ FatSecret REST API — Global Database (Live)
 
 ---
 
-## Step 6 — Warning System
+## Step 6 — Warning
 
-- Within 10% of target → no warning, proceed normally
-- Exceeded >10% → add below table:
-  **⚠️ WARNING: Exceeded today's target by XXX kcal. Tomorrow's adjusted target: XXXX kcal**
+If `get_day_summary` response contains `WARNING:` line → copy it below the table as-is.
 
 ---
 
-## Step 7 — Date Management
+## Step 7 — Date & History
 
-- One table per person per day — same table all day, new food appended to bottom
-- New day → new table automatically
-- Historical entry `add R to DD-MM [food]`:
-  → call `get_diary(date)` first to load existing entries
-  → append new food, recalculate totals, show full updated table
-
----
-
-## Step 8 — Weekly Comparison
-
-After 7 days tracked → show comparison table:
-| Date | Rajiv Cal | Target | % | Status |
-showing all 7 days with ✅ met / ⚠️ over / ❌ under
+- Same table maintained all day per person — new foods appended to bottom
+- New day → fresh table
+- Historical `add R to DD-MM food`:
+  → Call `get_diary(date)` first → loads existing TABLE_ROWs → append new food
 
 ---
 
-## Special Commands
+## Step 8 — View Commands
 
-### View Day
 ```
-"day R" / "summary R" / "calorie R today"
-→ get_day_summary(today, 1650) → show full table
-```
+"day R" / "summary R" / "calorie R today":
+→ Call get_day_summary(today, 1650)
+→ Build table using ALL_ITEMS_TABLE_ROWS from response
+→ Show with TOTALS_ROW and PCT_ROW
 
-### View Historical
-```
-"calorie R 13-06"
-→ get_diary(2026-06-13) → show as full table with confidence + links
-```
-
-### Delete Entry
-```
-"delete R [entry_id]"
-→ delete_food_entry(entry_id)
-→ get_day_summary → show updated table
-Note: always call "day R" first to see entry_ids
+"calorie R DD-MM":
+→ Call get_diary(date)
+→ Build table using TABLE_ROW entries from response
 ```
 
-### Update Entry
+---
+
+## Step 9 — Delete
+
 ```
-"update R [entry_id] [new_qty] [meal]"
-→ get_diary to get serving_id
-→ update_food_entry(entry_id, serving_id, quantity, meal)
-→ get_day_summary → show updated table
+"delete R [entry_id]":
+→ Call delete_food_entry(entry_id)
+→ Call get_day_summary to refresh
+→ Show updated table (remove that row)
 ```
 
-### Weight
+---
+
+## Step 10 — Update
+
 ```
-"weight R 72.5"
-→ log_weight(72.5, today)
-→ confirm: "⚖️ 72.5 kg logged for Rajiv on DD-MM"
+"update R [entry_id] [new_qty] [meal]":
+→ Call get_diary to get serving_id for that entry
+→ Call update_food_entry(entry_id, serving_id, new_qty, meal)
+→ Call get_day_summary to refresh
+→ Show updated table
+```
+
+---
+
+## Step 11 — Weight
+
+```
+"weight R 72.5":
+→ Call log_weight(72.5, today)
+→ Reply: "⚖️ 72.5 kg logged for Rajiv on DD-MM"
 ```
 
 ---
 
 ## Response Format
 
-Every successful add response:
-1. One line: **"Calorie Table updated for [Rajiv/Jasleen] DD-MM"**
-2. The table (with confidence column)
+Every successful add:
+1. **"Calorie Table updated for [Rajiv/Jasleen] DD-MM"**
+2. The 9-column table (all values from FatSecret MCP)
 3. **Remaining: XXX kcal**
-4. Source line: `✅ FatSecret REST API — Global Database (Live)`
-5. Warning only if exceeded >10%
+4. `✅ FatSecret REST API — Global Database (Live)`
+5. Warning if applicable
 6. Nothing else
 
 ---
 
-## Full Example
+## Example
 
 **User types:** `add R 100 gm rice lunch`
 
 **Skill does:**
-1. Person = Rajiv ✅, Meal = lunch ✅, Food = rice 100g ✅
-2. Calls `search_multi_food(["rice"], region="IN")`
-3. Gets: "White Rice (Cooked)" — 91/100 ✅ HIGH
-4. Calls `get_food(food_id)` → default serving = 100g, 130 cal, P:2.7g F:0.3g C:28g
-5. Quantity matches default → no scaling needed
-6. Calls `log_food(food_id, serving_id, qty=1, meal="lunch")`
-7. Calls `get_day_summary(today, 1650)`
-8. Shows:
+1. Person=Rajiv, Meal=lunch, Food=rice 100g
+2. Calls `search_multi_food(foods=["rice"], qty_map={"rice":"100g"}, region="IN")`
+3. Server returns TABLE_ROW: `| White Rice (Cooked) | 100g | 91/100 ✅ | [🔗 View](https://foods.fatsecret.com/calories-nutrition/generic/white-rice-cooked) | 130 | 2.7 | 0.3 | 28.0 |`
+4. STATUS=AUTO_LOG → copies row directly into table, calls log_food
+5. Calls get_day_summary → gets TOTALS_ROW and PCT_ROW
+6. Shows:
 
-**Rajiv 14-06 Calorie Counter**
+**Rajiv 15-06 Calorie Counter**
 
-| # | Food Name | Qty | Confidence | FatSecret Link | Calories | Protein (g) | Fat (g) | Carbs (g) |
-|---|-----------|-----|------------|----------------|----------|-------------|---------|-----------|
-| 1 | White Rice (Cooked) | 100g | 91/100 ✅ | fatsecret.com/white-rice | 130 | 2.7 | 0.3 | 28.0 |
-| | **TOTAL** | | | | **130** | **2.7** | **0.3** | **28.0** |
-| | **% of 1650** | | | | **7.9%** | **P:8%** | **F:2%** | **C:90%** |
+| # | Food Name | Qty | Calories | Protein (g) | Fat (g) | Carbs (g) | Confidence | FatSecret Link |
+|---|-----------|-----|----------|-------------|---------|-----------|------------|----------------|
+| 1 | White Rice (Cooked) | 100g | 91/100 ✅ | [🔗 View](https://foods.fatsecret.com/calories-nutrition/generic/white-rice-cooked) | 130 | 2.7 | 0.3 | 28.0 |
+| | **TOTAL** | — | — | — | **130** | **2.7** | **0.3** | **28.0** |
+| | **% of 1650** | — | — | — | **7.9%** | **P:8%** | **F:2%** | **C:90%** |
 
 **Remaining: 1,520 kcal**
 ✅ FatSecret REST API — Global Database (Live)
